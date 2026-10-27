@@ -1,0 +1,50 @@
+name: Build Royal Strip
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ windows-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+    env:
+      AAX_SDK_URL: ${{ secrets.AAX_SDK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Optional: AAX build. Put your Avid AAX SDK zip somewhere private and add its
+      # download URL as a repository secret named AAX_SDK_URL. Skip this and you get VST3/AU only.
+      - name: Fetch AAX SDK (optional)
+        if: ${{ env.AAX_SDK_URL != '' }}
+        shell: bash
+        run: |
+          curl -L "$AAX_SDK_URL" -o aax.zip
+          unzip -q aax.zip -d aax-sdk
+          echo "AAX_SDK_PATH=$(pwd)/aax-sdk/$(ls aax-sdk | head -n1)" >> "$GITHUB_ENV"
+
+      - name: Configure
+        shell: bash
+        run: |
+          if [ -n "$AAX_SDK_PATH" ]; then EXTRA="-DAAX_SDK_PATH=$AAX_SDK_PATH"; fi
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCOPY_AFTER_BUILD=OFF $EXTRA
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Collect plugins
+        shell: bash
+        run: |
+          mkdir out
+          find build -name "*.vst3" -maxdepth 6 -exec cp -R {} out/ \;
+          find build -name "*.component" -maxdepth 6 -exec cp -R {} out/ \; || true
+          find build -name "*.aaxplugin" -maxdepth 6 -exec cp -R {} out/ \; || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RoyalStrip-${{ matrix.os }}
+          path: out
